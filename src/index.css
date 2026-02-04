@@ -1,0 +1,84 @@
+@import "tailwindcss";
+
+:root {
+  --bg-primary: #0d0d0d;
+  --bg-secondary: #141414;
+  --bg-tertiary: #1a1a1a;
+  --bg-hover: #252525;
+  --border-color: #2a2a2a;
+  --text-primary: #e4e4e7;
+  --text-secondary: #a1a1aa;
+  --text-muted: #71717a;
+  --accent: #3b82f6;
+  --accent-hover: #2563eb;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', sans-serif;
+  font-size: 13px;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--bg-hover);
+}
+
+/* Allotment split view customization */
+:root {
+  --focus-border: var(--accent);
+  --separator-border: var(--border-color);
+}
+
+.split-view-view {
+  overflow: hidden;
+}
+
+.sash {
+  background: var(--border-color);
+  transition: background 0.15s ease;
+}
+
+.sash:hover,
+.sash.hover {
+  background: var(--accent);
+}
+
+.sash-vertical {
+  width: 4px !important;
+  cursor: col-resize;
+}
+
+/* Monaco editor override */
+.monaco-editor {
+  --vscode-editor-background: var(--bg-secondary) !important;
+}
