@@ -21,7 +21,6 @@ export function Terminal({ workspace }: TerminalProps) {
   const terminalRef = useRef<XTerm | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const ptyIdRef = useRef<string | null>(null);
-  const isInitializedRef = useRef(false);
 
   const setPtyId = useWorkspaceStore((s) => s.setPtyId);
 
@@ -29,7 +28,6 @@ export function Terminal({ workspace }: TerminalProps) {
     if (ptyIdRef.current || !terminalRef.current) return;
 
     try {
-      // Spawn a new PTY with Claude Code
       const ptyId = await invoke<string>('spawn_pty', {
         cwd: workspace.path,
         command: 'claude',
@@ -38,7 +36,6 @@ export function Terminal({ workspace }: TerminalProps) {
       ptyIdRef.current = ptyId;
       setPtyId(workspace.id, ptyId);
 
-      // Resize to match terminal dimensions
       if (fitAddonRef.current && terminalRef.current) {
         const dims = fitAddonRef.current.proposeDimensions();
         if (dims) {
@@ -57,137 +54,151 @@ export function Terminal({ workspace }: TerminalProps) {
   }, [workspace.path, workspace.id, setPtyId]);
 
   useEffect(() => {
-    if (!containerRef.current || isInitializedRef.current) return;
-    isInitializedRef.current = true;
+    const container = containerRef.current;
+    if (!container) return;
 
-    // Create terminal instance
-    const terminal = new XTerm({
-      fontFamily: "'JetBrains Mono', 'Fira Code', 'SF Mono', Menlo, monospace",
-      fontSize: 13,
-      lineHeight: 1.3,
-      cursorBlink: true,
-      cursorStyle: 'bar',
-      theme: {
-        background: '#0d0d0d',
-        foreground: '#e4e4e7',
-        cursor: '#3b82f6',
-        cursorAccent: '#0d0d0d',
-        selectionBackground: '#3b82f640',
-        black: '#27272a',
-        red: '#ef4444',
-        green: '#22c55e',
-        yellow: '#eab308',
-        blue: '#3b82f6',
-        magenta: '#a855f7',
-        cyan: '#06b6d4',
-        white: '#e4e4e7',
-        brightBlack: '#52525b',
-        brightRed: '#f87171',
-        brightGreen: '#4ade80',
-        brightYellow: '#facc15',
-        brightBlue: '#60a5fa',
-        brightMagenta: '#c084fc',
-        brightCyan: '#22d3ee',
-        brightWhite: '#fafafa',
-      },
-      allowTransparency: true,
-      scrollback: 10000,
-    });
-
-    terminalRef.current = terminal;
-
-    // Add fit addon
-    const fitAddon = new FitAddon();
-    fitAddonRef.current = fitAddon;
-    terminal.loadAddon(fitAddon);
-
-    // Open terminal in container
-    terminal.open(containerRef.current);
-
-    // Try WebGL addon for better performance
-    try {
-      const webglAddon = new WebglAddon();
-      webglAddon.onContextLoss(() => {
-        webglAddon.dispose();
-      });
-      terminal.loadAddon(webglAddon);
-    } catch (err) {
-      console.warn('WebGL addon not available, using canvas renderer');
+    // Clean up any existing terminal
+    if (terminalRef.current) {
+      terminalRef.current.dispose();
+      terminalRef.current = null;
     }
 
-    // Fit to container
-    setTimeout(() => {
+    let terminal: XTerm | null = null;
+    let fitAddon: FitAddon | null = null;
+    let resizeObserver: ResizeObserver | null = null;
+    let dataDisposable: { dispose: () => void } | null = null;
+    let unlistenOutputFn: (() => void) | null = null;
+    let unlistenExitFn: (() => void) | null = null;
+    let cancelled = false;
+
+    const initTerminal = async () => {
+      // Use SF Mono (macOS) or Menlo for best Unicode support
+      // These system fonts render block characters (progress bars) cleanly
+      const fontFamily = '"SF Mono", Menlo, Monaco, "Courier New", monospace';
+
+      if (cancelled) return;
+
+      terminal = new XTerm({
+        fontFamily,
+        fontSize: 13,
+        fontWeight: '500',
+        fontWeightBold: '700',
+        lineHeight: 1.3,
+        cursorBlink: true,
+        cursorStyle: 'bar',
+        theme: {
+          background: '#0d0d0d',
+          foreground: '#e4e4e7',
+          cursor: '#3b82f6',
+          cursorAccent: '#0d0d0d',
+          selectionBackground: '#3b82f640',
+          black: '#27272a',
+          red: '#ef4444',
+          green: '#22c55e',
+          yellow: '#eab308',
+          blue: '#3b82f6',
+          magenta: '#a855f7',
+          cyan: '#06b6d4',
+          white: '#e4e4e7',
+          brightBlack: '#52525b',
+          brightRed: '#f87171',
+          brightGreen: '#4ade80',
+          brightYellow: '#facc15',
+          brightBlue: '#60a5fa',
+          brightMagenta: '#c084fc',
+          brightCyan: '#22d3ee',
+          brightWhite: '#fafafa',
+        },
+      });
+
+      terminalRef.current = terminal;
+
+      fitAddon = new FitAddon();
+      fitAddonRef.current = fitAddon;
+      terminal.loadAddon(fitAddon);
+
+      // Open terminal after font is loaded
+      terminal.open(container);
+
+      // Enable WebGL for GPU-accelerated rendering (crisper fonts)
+      try {
+        const webglAddon = new WebglAddon();
+        webglAddon.onContextLoss(() => webglAddon.dispose());
+        terminal.loadAddon(webglAddon);
+      } catch {
+        console.warn('WebGL not available, using canvas renderer');
+      }
+
       fitAddon.fit();
-    }, 100);
 
-    // Handle terminal input
-    terminal.onData(async (data) => {
-      if (ptyIdRef.current) {
-        try {
-          await invoke('write_to_pty', { ptyId: ptyIdRef.current, data });
-        } catch (err) {
-          console.error('Failed to write to PTY:', err);
+      // Handle terminal input
+      dataDisposable = terminal.onData(async (data) => {
+        if (ptyIdRef.current) {
+          try {
+            await invoke('write_to_pty', { ptyId: ptyIdRef.current, data });
+          } catch (err) {
+            console.error('Failed to write to PTY:', err);
+          }
         }
-      }
-    });
+      });
 
-    // Listen for PTY output
-    const unlistenOutput = listen<PtyOutput>('pty-output', (event) => {
-      if (event.payload.pty_id === ptyIdRef.current) {
-        terminal.write(event.payload.data);
-      }
-    });
-
-    // Listen for PTY exit
-    const unlistenExit = listen<string>('pty-exit', (event) => {
-      if (event.payload === ptyIdRef.current) {
-        terminal.writeln('\r\n\x1b[33m[Process exited]\x1b[0m');
-        ptyIdRef.current = null;
-      }
-    });
-
-    // Handle resize
-    const resizeObserver = new ResizeObserver(() => {
-      if (fitAddonRef.current) {
-        fitAddonRef.current.fit();
-        const dims = fitAddonRef.current.proposeDimensions();
-        if (dims && ptyIdRef.current) {
-          invoke('resize_pty', {
-            ptyId: ptyIdRef.current,
-            rows: dims.rows,
-            cols: dims.cols,
-          }).catch(console.error);
+      // Listen for PTY output
+      const unlistenOutput = await listen<PtyOutput>('pty-output', (event) => {
+        if (event.payload.pty_id === ptyIdRef.current && terminal) {
+          terminal.write(event.payload.data);
         }
-      }
-    });
+      });
+      unlistenOutputFn = unlistenOutput;
 
-    resizeObserver.observe(containerRef.current);
+      // Listen for PTY exit
+      const unlistenExit = await listen<string>('pty-exit', (event) => {
+        if (event.payload === ptyIdRef.current && terminal) {
+          terminal.writeln('\r\n\x1b[33m[Process exited]\x1b[0m');
+          ptyIdRef.current = null;
+        }
+      });
+      unlistenExitFn = unlistenExit;
 
-    // Spawn terminal
-    spawnTerminal();
+      // Handle resize
+      resizeObserver = new ResizeObserver(() => {
+        if (fitAddon) {
+          fitAddon.fit();
+          const dims = fitAddon.proposeDimensions();
+          if (dims && ptyIdRef.current) {
+            invoke('resize_pty', {
+              ptyId: ptyIdRef.current,
+              rows: dims.rows,
+              cols: dims.cols,
+            }).catch(console.error);
+          }
+        }
+      });
+      resizeObserver.observe(container);
+
+      // Spawn PTY
+      spawnTerminal();
+    };
+
+    initTerminal();
 
     return () => {
-      resizeObserver.disconnect();
-      unlistenOutput.then((fn) => fn());
-      unlistenExit.then((fn) => fn());
+      cancelled = true;
+      resizeObserver?.disconnect();
+      dataDisposable?.dispose();
+      unlistenOutputFn?.();
+      unlistenExitFn?.();
 
       if (ptyIdRef.current) {
         invoke('kill_pty', { ptyId: ptyIdRef.current }).catch(console.error);
+        ptyIdRef.current = null;
       }
 
-      terminal.dispose();
+      if (terminal) {
+        terminal.dispose();
+      }
+      terminalRef.current = null;
     };
-  }, [spawnTerminal]);
-
-  // Handle workspace change - respawn terminal
-  useEffect(() => {
-    if (workspace.ptyId !== ptyIdRef.current && terminalRef.current) {
-      // Workspace changed or PTY needs respawn
-      if (!workspace.ptyId && !ptyIdRef.current) {
-        spawnTerminal();
-      }
-    }
-  }, [workspace.ptyId, spawnTerminal]);
+  }, [workspace.id, workspace.path, setPtyId, spawnTerminal]);
 
   return (
     <div className="h-full flex flex-col">
