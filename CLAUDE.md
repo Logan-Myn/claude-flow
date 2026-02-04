@@ -6,6 +6,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ClaudeFlow is a minimal 3-panel desktop IDE built with Tauri v2, React 19, and TypeScript. It features Warp-style workspace tabs where each tab represents a complete workspace with its own folder, editor state, and dedicated Claude Code terminal session.
 
+## CPD Workflow
+
+For this project, when the user says "CPD" it means **Commit and Push only** - do NOT build release artifacts (.dmg, .app bundles) or create GitHub releases.
+
 ## Commands
 
 ### Development
